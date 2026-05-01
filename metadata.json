@@ -1,0 +1,6 @@
+{
+  "name": "FleetPro PWA",
+  "description": "Logiciel de gestion de flotte de véhicules léger et rapide : suivi des véhicules, entretiens, chauffeurs, loyers et tableau de bord de performance.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": []
+}

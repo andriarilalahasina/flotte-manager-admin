@@ -1,0 +1,21 @@
+{
+  "name": "T-1000 Fleet Management",
+  "short_name": "T-1000",
+  "description": "Gestion de flotte de véhicules pour T-1000.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F9F7F2",
+  "theme_color": "#829379",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3082/3082332.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3082/3082332.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
