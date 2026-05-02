@@ -11,11 +11,26 @@ import {
   History
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { toast } from 'sonner';
 import { fleetService } from '../services/fleetService';
 import { Vehicle, VehicleStatus, Assignment, Driver, MaintenanceRecord } from '../types';
 import { cn } from '../lib/utils';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+
+const vehicleSchema = z.object({
+  licensePlate: z.string().min(1, 'Obligatoire'),
+  model: z.string().min(1, 'Obligatoire'),
+  year: z.string().optional(),
+  engineNumber: z.string().optional(),
+  lastMaintenance: z.string().optional(),
+  status: z.enum(['active', 'maintenance', 'retired']).default('active'),
+});
+
+type VehicleFormData = z.infer<typeof vehicleSchema>;
 import ImageUpload from './ui/ImageUpload';
 
 export default function Vehicles() {
@@ -27,14 +42,61 @@ export default function Vehicles() {
   const [viewingMaintenance, setViewingMaintenance] = useState<Vehicle | null>(null);
   const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceRecord[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState<VehicleStatus | 'all'>('all');
+  const [filterStatus, setFilterStatus] = useState<VehicleStatus | 'all'>('active');
   const [photoUrl, setPhotoUrl] = useState('');
   const [regPhotoUrl, setRegPhotoUrl] = useState('');
 
+  const { 
+    register: registerEdit, 
+    handleSubmit: handleEditSubmit, 
+    formState: { errors: errorsEdit }, 
+    reset: resetEdit 
+  } = useForm<VehicleFormData>({ resolver: zodResolver(vehicleSchema) });
+
+  const { 
+    register: registerAdd, 
+    handleSubmit: handleAddSubmit, 
+    formState: { errors: errorsAdd }, 
+    reset: resetAdd 
+  } = useForm<VehicleFormData>({ resolver: zodResolver(vehicleSchema) });
+
   useEffect(() => {
-    const unsubV = fleetService.subscribeVehicles(setVehicles);
+    if (editingVehicle) {
+      resetEdit({
+        licensePlate: editingVehicle.licensePlate,
+        model: editingVehicle.model,
+        year: editingVehicle.year || '',
+        engineNumber: editingVehicle.engineNumber || '',
+        lastMaintenance: editingVehicle.lastMaintenance || '',
+        status: editingVehicle.status
+      });
+      setPhotoUrl(editingVehicle.photoUrl || '');
+      setRegPhotoUrl(editingVehicle.registrationPhotoUrl || '');
+    }
+  }, [editingVehicle, resetEdit]);
+
+  useEffect(() => {
+    if (isAdding) {
+      resetAdd({});
+      setPhotoUrl('');
+      setRegPhotoUrl('');
+    }
+  }, [isAdding, resetAdd]);
+  const [loading, setLoading] = useState(true);
+  const [viewingGallery, setViewingGallery] = useState<Vehicle | null>(null);
+
+  useEffect(() => {
+    let vehiclesLoaded = false;
+    let driversLoaded = false;
+    
+    const checkLoading = () => {
+      if (vehiclesLoaded && driversLoaded) setLoading(false);
+    };
+
+    const unsubV = fleetService.subscribeVehicles((v) => { setVehicles(v); vehiclesLoaded = true; checkLoading(); });
     const unsubA = fleetService.subscribeAssignments(setAssignments);
-    const unsubD = fleetService.subscribeDrivers(setDrivers);
+    const unsubD = fleetService.subscribeDrivers((d) => { setDrivers(d); driversLoaded = true; checkLoading(); });
+    
     return () => {
       unsubV();
       unsubA();
@@ -56,14 +118,28 @@ export default function Vehicles() {
     return drivers.find(d => d.id === activeAssignment.driverId);
   };
 
-  const filteredVehicles = vehicles.filter(v => {
-    const licensePlate = v.licensePlate || '';
-    const model = v.model || '';
-    const matchesSearch = licensePlate.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                         model.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesFilter = filterStatus === 'all' || v.status === filterStatus;
-    return matchesSearch && matchesFilter;
-  });
+  const getComputedVehicleStatus = (vehicle: Vehicle): VehicleStatus => {
+    if (vehicle.status === 'maintenance' || vehicle.status === 'retired') return vehicle.status;
+    const driver = getCurrentDriver(vehicle.id);
+    if (!driver || driver.status !== 'active') return 'inactive';
+    return 'active';
+  };
+
+  const filteredVehicles = vehicles
+    .filter(v => {
+      const licensePlate = v.licensePlate || '';
+      const model = v.model || '';
+      const matchesSearch = licensePlate.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                           model.toLowerCase().includes(searchTerm.toLowerCase());
+      const computedStatus = getComputedVehicleStatus(v);
+      const matchesFilter = filterStatus === 'all' || computedStatus === filterStatus;
+      return matchesSearch && matchesFilter;
+    })
+    .sort((a, b) => {
+      const plateA = a.licensePlate || '';
+      const plateB = b.licensePlate || '';
+      return plateA.localeCompare(plateB, undefined, { numeric: true, sensitivity: 'base' });
+    });
 
   const formatDate = (dateStr: string | undefined | null) => {
     if (!dateStr) return 'N/A';
@@ -77,8 +153,20 @@ export default function Vehicles() {
   const getStatusColor = (status: VehicleStatus) => {
     switch (status) {
       case 'active': return 'bg-green-50 text-green-700 border-green-100';
+      case 'inactive': return 'bg-gray-50 text-gray-500 border-gray-200';
       case 'maintenance': return 'bg-[#FFF5F2] text-[#D97757] border-[#F2D7D0]';
       case 'retired': return 'bg-neutral-50 text-neutral-600 border-neutral-100';
+      default: return 'bg-gray-50 text-gray-500 border-gray-200';
+    }
+  };
+
+  const getStatusLabel = (status: VehicleStatus) => {
+    switch (status) {
+      case 'active': return 'Actif';
+      case 'inactive': return 'Inactif';
+      case 'maintenance': return 'Maintenance';
+      case 'retired': return 'Retiré';
+      default: return status;
     }
   };
 
@@ -91,12 +179,20 @@ export default function Vehicles() {
         </div>
         <button 
           onClick={() => setIsAdding(true)}
-          className="bg-[#829379] text-white px-6 py-3 rounded-xl flex items-center gap-2 font-semibold hover:bg-[#708266] transition-all shadow-md active:scale-95"
+          className="hidden sm:flex bg-[#829379] text-white px-6 py-3 rounded-xl items-center gap-2 font-semibold hover:bg-[#708266] transition-all shadow-md active:scale-95"
         >
           <Plus className="w-5 h-5" />
           Ajouter un véhicule
         </button>
       </div>
+
+      {/* FAB Mobile */}
+      <button 
+        onClick={() => setIsAdding(true)}
+        className="fixed bottom-6 right-6 z-40 sm:hidden bg-[#829379] text-white p-4 rounded-full shadow-xl active:scale-95 transition-transform"
+      >
+        <Plus className="w-6 h-6" />
+      </button>
 
       {/* Filters */}
       <div className="flex flex-col md:flex-row gap-4 bg-[#F0EDE4]/30 p-4 rounded-2xl border border-[#E2DDD1]">
@@ -111,7 +207,7 @@ export default function Vehicles() {
           />
         </div>
         <div className="flex flex-wrap gap-1 p-1 bg-[#F0EDE4] border border-[#E2DDD1] rounded-xl overflow-hidden">
-          {(['all', 'active', 'maintenance', 'retired'] as const).map((status) => (
+          {(['all', 'active', 'inactive', 'maintenance', 'retired'] as const).map((status) => (
             <button
               key={status}
               onClick={() => setFilterStatus(status)}
@@ -122,7 +218,7 @@ export default function Vehicles() {
                   : "text-[#70695E] hover:text-[#2D2A26]"
               )}
             >
-              {status === 'all' ? 'Tous' : status}
+              {status === 'all' ? 'Tous' : getStatusLabel(status)}
             </button>
           ))}
         </div>
@@ -130,8 +226,20 @@ export default function Vehicles() {
 
       {/* Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <AnimatePresence mode="popLayout">
-          {filteredVehicles.map((vehicle, i) => (
+        {loading && vehicles.length === 0 ? (
+          Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="bg-white border border-[#E2DDD1] rounded-2xl overflow-hidden h-[340px] animate-pulse">
+              <div className="h-32 bg-[#F0EDE4] w-full" />
+              <div className="p-6 space-y-4">
+                <div className="flex justify-between"><div className="w-10 h-10 bg-[#F0EDE4] rounded-xl" /><div className="w-16 h-6 bg-[#F0EDE4] rounded-full" /></div>
+                <div className="space-y-2"><div className="h-5 bg-[#F0EDE4] rounded w-3/4" /><div className="h-4 bg-[#F0EDE4] rounded w-1/2" /></div>
+                <div className="space-y-2 pt-4 border-t border-[#F0EDE4]"><div className="h-3 bg-[#F0EDE4] rounded w-full" /><div className="h-3 bg-[#F0EDE4] rounded w-full" /></div>
+              </div>
+            </div>
+          ))
+        ) : (
+          <AnimatePresence mode="popLayout">
+            {filteredVehicles.map((vehicle, i) => (
             <motion.div
               layout
               initial={{ opacity: 0, scale: 0.95 }}
@@ -157,9 +265,9 @@ export default function Vehicles() {
                   </div>
                   <span className={cn(
                     "px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight border",
-                    getStatusColor(vehicle.status)
+                    getStatusColor(getComputedVehicleStatus(vehicle))
                   )}>
-                    {vehicle.status}
+                    {getStatusLabel(getComputedVehicleStatus(vehicle))}
                   </span>
                 </div>
 
@@ -180,15 +288,9 @@ export default function Vehicles() {
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-[#9A9388]">Entretien</span>
+                    <span className="text-[#9A9388]">Dernière Vidange</span>
                     <span className="font-semibold text-[#4A453E]">
                       {formatDate(vehicle.lastMaintenance)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-[#9A9388]">Kilométrage</span>
-                    <span className="font-bold text-[#829379]">
-                      {(vehicle.currentKm || vehicle.mileage || 0).toLocaleString()} KM
                     </span>
                   </div>
                 </div>
@@ -197,32 +299,33 @@ export default function Vehicles() {
               <div className="px-6 py-3 bg-[#F9F7F2] flex items-center justify-between border-t border-[#E2DDD1]">
                 <div className="flex gap-3">
                   <button 
-                    onClick={() => {
-                      if (vehicle.registrationPhotoUrl) {
-                        window.open(vehicle.registrationPhotoUrl, '_blank');
-                      } else {
-                        alert('Aucun document enregistré pour ce véhicule.');
-                      }
-                    }}
+                    onClick={() => setViewingGallery(vehicle)}
                     className="text-[#9A9388] hover:text-[#829379] transition-colors"
+                    title="Voir les photos"
                   >
                     <FileText className="w-4 h-4" />
                   </button>
                   <button 
                     onClick={() => setViewingMaintenance(vehicle)}
                     className="text-[#9A9388] hover:text-[#829379] transition-colors"
+                    title="Historique des entretiens"
                   >
                     <History className="w-4 h-4" />
                   </button>
                   <button 
                     onClick={async () => {
-                      const newStatus: VehicleStatus = vehicle.status === 'maintenance' ? 'active' : 'maintenance';
-                      await fleetService.updateVehicle(vehicle.id, { status: newStatus });
+                      if (vehicle.status === 'maintenance') {
+                         await fleetService.updateVehicle(vehicle.id, { status: 'active' });
+                         toast.success("Véhicule de retour en service");
+                      } else {
+                         setViewingMaintenance(vehicle);
+                      }
                     }}
                     className={cn(
                       "transition-colors",
                       vehicle.status === 'maintenance' ? "text-[#D97757]" : "text-[#9A9388] hover:text-[#D97757]"
                     )}
+                    title={vehicle.status === 'maintenance' ? "Terminer la maintenance" : "Passer en maintenance"}
                   >
                     <Wrench className="w-4 h-4" />
                   </button>
@@ -238,13 +341,20 @@ export default function Vehicles() {
             </motion.div>
           ))}
         </AnimatePresence>
+        )}
       </div>
 
-      {filteredVehicles.length === 0 && (
-        <div className="py-20 text-center bg-white border border-dashed border-neutral-300 rounded-3xl">
-          <Car className="w-16 h-16 text-neutral-100 mx-auto mb-4" />
+      {!loading && filteredVehicles.length === 0 && (
+        <div className="py-20 text-center bg-white border border-dashed border-neutral-300 rounded-3xl flex flex-col items-center">
+          <Car className="w-16 h-16 text-neutral-100 mb-4" />
           <h3 className="text-lg font-bold text-neutral-900">Aucun véhicule trouvé</h3>
-          <p className="text-neutral-400">Essayez de modifier vos filtres ou ajoutez un nouveau véhicule.</p>
+          <p className="text-neutral-400 mb-6">Essayez de modifier vos filtres ou ajoutez un nouveau véhicule.</p>
+          <button 
+            onClick={() => setIsAdding(true)}
+            className="bg-[#F0EDE4] text-[#2D2A26] px-6 py-3 rounded-xl font-bold hover:bg-[#E2DDD1] transition-colors"
+          >
+            Créer mon premier véhicule
+          </button>
         </div>
       )}
 
@@ -262,7 +372,7 @@ export default function Vehicles() {
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative w-full max-w-2xl bg-white rounded-[40px] p-5 sm:p-8 shadow-2xl max-h-[90vh] flex flex-col"
+              className="relative h-full w-full bg-white rounded-none sm:h-auto sm:w-full sm:max-w-2xl sm:rounded-[40px] p-5 sm:p-8 shadow-2xl overflow-y-auto sm:max-h-[90vh] flex flex-col"
             >
               <div className="flex items-center justify-between mb-8">
                 <div>
@@ -286,17 +396,27 @@ export default function Vehicles() {
                       type: formData.get('type') as any,
                       description: formData.get('description') as string,
                       cost: Number(formData.get('cost')),
-                      kilometers: Number(formData.get('kilometers'))
                     };
-                    await fleetService.addMaintenanceRecord(record);
-                    await fleetService.updateVehicle(viewingMaintenance.id, { 
-                      lastMaintenance: record.date,
-                      currentKm: record.kilometers // Update KM as well
-                    });
-                    (e.target as HTMLFormElement).reset();
+                    try {
+                      await fleetService.addMaintenanceRecord(record);
+                      const updates: Partial<Vehicle> = {};
+                      if (record.type === 'vidange') {
+                        updates.lastMaintenance = record.date;
+                      }
+                      if (formData.get('setMaintenanceStatus') === 'on') {
+                        updates.status = 'maintenance';
+                      }
+                      if (Object.keys(updates).length > 0) {
+                        await fleetService.updateVehicle(viewingMaintenance.id, updates);
+                      }
+                      toast.success("Entretien enregistré avec succès");
+                      (e.target as HTMLFormElement).reset();
+                    } catch (error) {
+                      toast.error("Erreur lors de l'enregistrement de l'entretien");
+                    }
                   }} className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
-                      <input name="date" required type="date" className="px-4 py-2 bg-white border border-[#D9D4C7] rounded-xl text-xs focus:outline-none" />
+                      <input name="date" required type="date" defaultValue={new Date().toISOString().split('T')[0]} className="px-4 py-2 bg-white border border-[#D9D4C7] rounded-xl text-xs focus:outline-none" />
                       <select name="type" required className="px-4 py-2 bg-white border border-[#D9D4C7] rounded-xl text-xs focus:outline-none">
                         <option value="vidange">Vidange</option>
                         <option value="revision">Révision</option>
@@ -304,12 +424,17 @@ export default function Vehicles() {
                         <option value="autre">Autre</option>
                       </select>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <input name="cost" required type="number" placeholder="Coût (Ar)" className="px-4 py-2 bg-white border border-[#D9D4C7] rounded-xl text-xs focus:outline-none" />
-                      <input name="kilometers" required type="number" placeholder="Kilométrage" className="px-4 py-2 bg-white border border-[#D9D4C7] rounded-xl text-xs focus:outline-none" />
+                    <div>
+                      <input name="cost" required type="number" placeholder="Coût (Ar)" className="w-full px-4 py-2 bg-white border border-[#D9D4C7] rounded-xl text-xs focus:outline-none" />
                     </div>
                     <textarea name="description" required placeholder="Détails des travaux (pièces changées, etc.)" className="w-full px-4 py-2 bg-white border border-[#D9D4C7] rounded-xl text-xs focus:outline-none h-20 resize-none"></textarea>
-                    <button type="submit" className="w-full py-3 bg-[#829379] text-white rounded-xl text-xs font-bold shadow-md active:scale-95 transition-all">Enregistrer</button>
+                    
+                    <label className="flex items-center gap-2 text-[10px] uppercase font-bold text-[#D97757] tracking-wider cursor-pointer bg-[#FFF5F2] p-3 rounded-xl border border-[#F2D7D0]">
+                      <input type="checkbox" name="setMaintenanceStatus" defaultChecked={viewingMaintenance.status !== 'maintenance'} className="w-4 h-4 rounded text-[#D97757] focus:ring-[#D97757]" />
+                      Passer le véhicule en 'Maintenance' (Inactif)
+                    </label>
+
+                    <button type="submit" className="w-full py-3 bg-[#829379] text-white rounded-xl text-xs font-bold shadow-md active:scale-95 transition-all">Enregistrer l'entretien</button>
                   </form>
                 </div>
 
@@ -327,7 +452,6 @@ export default function Vehicles() {
                         <p className="text-xs text-[#2D2A26] font-medium leading-relaxed">{record.description}</p>
                         <div className="flex items-center gap-4 mt-2">
                            <span className="text-[10px] font-bold text-[#D97757] bg-[#FFF5F2] px-2 py-0.5 rounded-full">{record.cost.toLocaleString()} Ar</span>
-                           <span className="text-[10px] font-bold text-[#9A9388]">{record.kilometers.toLocaleString()} KM</span>
                         </div>
                       </div>
                     </div>
@@ -361,32 +485,27 @@ export default function Vehicles() {
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative w-full max-w-lg bg-white rounded-[40px] p-8 shadow-2xl max-h-[90vh] overflow-y-auto"
+              className="relative h-full w-full bg-white rounded-none sm:h-auto sm:w-full sm:max-w-lg sm:rounded-[40px] p-5 sm:p-8 shadow-2xl overflow-y-auto sm:max-h-[90vh]"
             >
               <h2 className="text-2xl font-bold mb-6">Modifier véhicule</h2>
-              <form className="space-y-4" onSubmit={async (e) => { 
-                e.preventDefault(); 
-                const formData = new FormData(e.currentTarget);
-                const vehicleData = {
-                  licensePlate: (formData.get('licensePlate') || '') as string,
-                  model: (formData.get('model') || '') as string,
-                  year: (formData.get('year') || '') as string,
-                  engineNumber: (formData.get('engineNumber') || '') as string,
-                  lastMaintenance: (formData.get('lastMaintenance') || '') as string,
-                  currentKm: Number(formData.get('currentKm') || 0),
-                  status: (formData.get('status') || 'active') as VehicleStatus,
-                  photoUrl: photoUrl || editingVehicle.photoUrl,
-                  registrationPhotoUrl: regPhotoUrl || editingVehicle.registrationPhotoUrl,
-                };
-                await fleetService.updateVehicle(editingVehicle.id, vehicleData);
-                setEditingVehicle(null);
-                setPhotoUrl('');
-                setRegPhotoUrl('');
-              }}>
+              <form className="space-y-4" onSubmit={handleEditSubmit(async (data) => {
+                try {
+                  const vehicleData = {
+                    ...data,
+                    photoUrl: photoUrl || editingVehicle.photoUrl,
+                    registrationPhotoUrl: regPhotoUrl || editingVehicle.registrationPhotoUrl,
+                  };
+                  await fleetService.updateVehicle(editingVehicle.id, vehicleData);
+                  toast.success("Véhicule modifié avec succès");
+                  setEditingVehicle(null);
+                } catch (error) {
+                  toast.error("Erreur lors de la modification du véhicule");
+                }
+              })}>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-[#9A9388] ml-1">Statut</label>
-                    <select name="status" defaultValue={editingVehicle.status} className="w-full px-4 py-3 bg-[#F9F7F2] border border-[#D9D4C7] rounded-xl focus:outline-none">
+                    <select {...registerEdit('status')} className="w-full px-4 py-3 bg-[#F9F7F2] border border-[#D9D4C7] rounded-xl focus:outline-none">
                       <option value="active">Actif</option>
                       <option value="maintenance">En Entretien</option>
                       <option value="retired">Retiré</option>
@@ -394,30 +513,26 @@ export default function Vehicles() {
                   </div>
                   <div className="space-y-1">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-[#9A9388] ml-1">Immatriculation</label>
-                    <input name="licensePlate" defaultValue={editingVehicle.licensePlate} required type="text" className="w-full px-4 py-3 bg-[#F9F7F2] border border-[#D9D4C7] rounded-xl focus:outline-none" />
+                    <input {...registerEdit('licensePlate')} type="text" className={cn("w-full px-4 py-3 bg-[#F9F7F2] border rounded-xl focus:outline-none", errorsEdit.licensePlate ? "border-red-500" : "border-[#D9D4C7]")} />
+                    {errorsEdit.licensePlate && <p className="text-red-500 text-[10px] ml-1">{errorsEdit.licensePlate.message}</p>}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-[#9A9388] ml-1">Modèle</label>
-                    <input name="model" defaultValue={editingVehicle.model} required type="text" className="w-full px-4 py-3 bg-[#F9F7F2] border border-[#D9D4C7] rounded-xl focus:outline-none" />
+                    <input {...registerEdit('model')} type="text" className={cn("w-full px-4 py-3 bg-[#F9F7F2] border rounded-xl focus:outline-none", errorsEdit.model ? "border-red-500" : "border-[#D9D4C7]")} />
+                    {errorsEdit.model && <p className="text-red-500 text-[10px] ml-1">{errorsEdit.model.message}</p>}
                   </div>
                   <div className="space-y-1">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-[#9A9388] ml-1">Année</label>
-                    <input name="year" defaultValue={editingVehicle.year} type="text" className="w-full px-4 py-3 bg-[#F9F7F2] border border-[#D9D4C7] rounded-xl focus:outline-none" />
+                    <input {...registerEdit('year')} type="text" className="w-full px-4 py-3 bg-[#F9F7F2] border border-[#D9D4C7] rounded-xl focus:outline-none" />
                   </div>
                 </div>
                 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-[#9A9388] ml-1">Dernier Entretien</label>
-                    <input name="lastMaintenance" defaultValue={editingVehicle.lastMaintenance} type="date" className="w-full px-4 py-3 bg-[#F9F7F2] border border-[#D9D4C7] rounded-xl focus:outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-[#9A9388] ml-1">Kilométrage</label>
-                    <input name="currentKm" defaultValue={editingVehicle.currentKm} type="number" className="w-full px-4 py-3 bg-[#F9F7F2] border border-[#D9D4C7] rounded-xl focus:outline-none" />
-                  </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-[#9A9388] ml-1">Dernier Entretien (Vidange)</label>
+                  <input {...registerEdit('lastMaintenance')} type="date" className="w-full px-4 py-3 bg-[#F9F7F2] border border-[#D9D4C7] rounded-xl focus:outline-none" />
                 </div>
 
                 <div className="space-y-4 pt-4 border-t border-[#F0EDE4]">
@@ -474,60 +589,50 @@ export default function Vehicles() {
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative w-full max-w-lg bg-white rounded-[40px] p-8 shadow-2xl max-h-[90vh] overflow-y-auto"
+              className="relative h-full w-full bg-white rounded-none sm:h-auto sm:w-full sm:max-w-lg sm:rounded-[40px] p-5 sm:p-8 shadow-2xl overflow-y-auto sm:max-h-[90vh]"
             >
               <h2 className="text-2xl font-bold mb-6">Nouveau véhicule</h2>
-              <form className="space-y-4" onSubmit={async (e) => { 
-                e.preventDefault(); 
-                const formData = new FormData(e.currentTarget);
-                const vehicleData = {
-                  licensePlate: (formData.get('licensePlate') || '') as string,
-                  model: (formData.get('model') || '') as string,
-                  year: (formData.get('year') || '') as string,
-                  engineNumber: (formData.get('engineNumber') || '') as string,
-                  insuranceExpiry: (formData.get('insuranceExpiry') || '') as string,
-                  lastMaintenance: (formData.get('lastMaintenance') || '') as string,
-                  currentKm: Number(formData.get('currentKm') || 0),
-                  status: 'active' as VehicleStatus,
-                  photoUrl: photoUrl,
-                  registrationPhotoUrl: regPhotoUrl,
-                };
-                await fleetService.addVehicle(vehicleData as any);
-                setIsAdding(false); 
-                setPhotoUrl('');
-                setRegPhotoUrl('');
-              }}>
+              <form className="space-y-4" onSubmit={handleAddSubmit(async (data) => {
+                try {
+                  const vehicleData = {
+                    ...data,
+                    photoUrl: photoUrl,
+                    registrationPhotoUrl: regPhotoUrl,
+                  };
+                  await fleetService.addVehicle(vehicleData as any);
+                  toast.success("Véhicule ajouté avec succès");
+                  setIsAdding(false); 
+                } catch (error) {
+                  toast.error("Erreur lors de l'ajout du véhicule");
+                }
+              })}>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-[#9A9388] ml-1">Immatriculation</label>
-                    <input name="licensePlate" required type="text" placeholder="Ex: 1234 TAA" className="w-full px-4 py-3 bg-[#F9F7F2] border border-[#D9D4C7] rounded-xl focus:outline-none" />
+                    <input {...registerAdd('licensePlate')} type="text" placeholder="Ex: 1234 TAA" className={cn("w-full px-4 py-3 bg-[#F9F7F2] border rounded-xl focus:outline-none", errorsAdd.licensePlate ? "border-red-500" : "border-[#D9D4C7]")} />
+                    {errorsAdd.licensePlate && <p className="text-red-500 text-[10px] ml-1">{errorsAdd.licensePlate.message}</p>}
                   </div>
                   <div className="space-y-1">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-[#9A9388] ml-1">Modèle</label>
-                    <input name="model" required type="text" placeholder="Toyota Corolla" className="w-full px-4 py-3 bg-[#F9F7F2] border border-[#D9D4C7] rounded-xl focus:outline-none" />
+                    <input {...registerAdd('model')} type="text" placeholder="Toyota Corolla" className={cn("w-full px-4 py-3 bg-[#F9F7F2] border rounded-xl focus:outline-none", errorsAdd.model ? "border-red-500" : "border-[#D9D4C7]")} />
+                    {errorsAdd.model && <p className="text-red-500 text-[10px] ml-1">{errorsAdd.model.message}</p>}
                   </div>
                 </div>
                 
                 <div className="grid grid-cols-3 gap-4">
                   <div className="space-y-1">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-[#9A9388] ml-1">Année</label>
-                    <input name="year" type="text" placeholder="2022" className="w-full px-4 py-3 bg-[#F9F7F2] border border-[#D9D4C7] rounded-xl focus:outline-none" />
+                    <input {...registerAdd('year')} type="text" placeholder="2022" className="w-full px-4 py-3 bg-[#F9F7F2] border border-[#D9D4C7] rounded-xl focus:outline-none" />
                   </div>
                   <div className="col-span-2 space-y-1">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-[#9A9388] ml-1">N° Moteur</label>
-                    <input name="engineNumber" type="text" placeholder="..." className="w-full px-4 py-3 bg-[#F9F7F2] border border-[#D9D4C7] rounded-xl focus:outline-none" />
+                    <input {...registerAdd('engineNumber')} type="text" placeholder="..." className="w-full px-4 py-3 bg-[#F9F7F2] border border-[#D9D4C7] rounded-xl focus:outline-none" />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-[#9A9388] ml-1">Dernier Entretien</label>
-                    <input name="lastMaintenance" type="date" className="w-full px-4 py-3 bg-[#F9F7F2] border border-[#D9D4C7] rounded-xl focus:outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-[#9A9388] ml-1">Kilométrage</label>
-                    <input name="currentKm" type="number" placeholder="0" className="w-full px-4 py-3 bg-[#F9F7F2] border border-[#D9D4C7] rounded-xl focus:outline-none" />
-                  </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-[#9A9388] ml-1">Dernier Entretien (Vidange)</label>
+                  <input {...registerAdd('lastMaintenance')} type="date" className="w-full px-4 py-3 bg-[#F9F7F2] border border-[#D9D4C7] rounded-xl focus:outline-none" />
                 </div>
 
                 <div className="space-y-4 pt-4 border-t border-[#F0EDE4]">
@@ -560,6 +665,61 @@ export default function Vehicles() {
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {viewingGallery && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setViewingGallery(null)}
+              className="absolute inset-0 bg-black/90 backdrop-blur-sm" 
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-4xl bg-transparent flex flex-col h-full max-h-[90vh] pointer-events-none"
+            >
+              <div className="flex justify-between items-center mb-6 pointer-events-auto">
+                <h2 className="text-2xl font-bold text-white">Galerie Photos - {viewingGallery.licensePlate}</h2>
+                <button onClick={() => setViewingGallery(null)} className="text-white/70 hover:text-white bg-white/10 p-2 rounded-full">
+                  <Plus className="w-6 h-6 rotate-45" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto pointer-events-auto pr-2 pb-20">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  {viewingGallery.photoUrl && (
+                    <div className="bg-black/50 rounded-2xl overflow-hidden border border-white/10 flex flex-col">
+                      <div className="p-3 bg-black/50 border-b border-white/10 text-white text-xs font-bold uppercase tracking-wider">Photo du Véhicule</div>
+                      <a href={viewingGallery.photoUrl} target="_blank" rel="noreferrer" className="block relative group aspect-video bg-black">
+                        <img src={viewingGallery.photoUrl} alt="Véhicule" className="w-full h-full object-contain" />
+                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"><Search className="text-white w-8 h-8" /></div>
+                      </a>
+                    </div>
+                  )}
+                  {viewingGallery.registrationPhotoUrl && (
+                    <div className="bg-black/50 rounded-2xl overflow-hidden border border-white/10 flex flex-col">
+                      <div className="p-3 bg-black/50 border-b border-white/10 text-white text-xs font-bold uppercase tracking-wider">Carte Grise</div>
+                      <a href={viewingGallery.registrationPhotoUrl} target="_blank" rel="noreferrer" className="block relative group aspect-video bg-black">
+                        <img src={viewingGallery.registrationPhotoUrl} alt="Carte Grise" className="w-full h-full object-contain" />
+                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"><Search className="text-white w-8 h-8" /></div>
+                      </a>
+                    </div>
+                  )}
+                </div>
+                {!viewingGallery.photoUrl && !viewingGallery.registrationPhotoUrl && (
+                  <div className="text-center py-20">
+                    <FileText className="w-16 h-16 text-white/20 mx-auto mb-4" />
+                    <p className="text-white/60 font-medium">Aucune photo enregistrée pour ce véhicule.</p>
+                  </div>
+                )}
+              </div>
             </motion.div>
           </div>
         )}

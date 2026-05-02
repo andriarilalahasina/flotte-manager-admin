@@ -6,6 +6,7 @@ import {
   Users, 
   CalendarCheck, 
   DollarSign, 
+  Receipt,
   Bell, 
   Settings,
   LogOut,
@@ -13,6 +14,7 @@ import {
   X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Toaster } from 'sonner';
 import { cn } from './lib/utils';
 
 // Pages - to be created
@@ -21,6 +23,7 @@ import Vehicles from './components/Vehicles';
 import Drivers from './components/Drivers';
 import Assignments from './components/Assignments';
 import Payments from './components/Payments';
+import Expenses from './components/Expenses';
 import Login from './components/Login';
 
 const NAV_ITEMS = [
@@ -29,6 +32,7 @@ const NAV_ITEMS = [
   { label: 'Chauffeurs', icon: Users, path: '/drivers' },
   { label: 'Assignations', icon: CalendarCheck, path: '/assignments' },
   { label: 'Paiements', icon: DollarSign, path: '/payments' },
+  { label: 'Frais Généraux', icon: Receipt, path: '/expenses' },
 ];
 
 function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
@@ -190,6 +194,7 @@ export default function App() {
                   <Route path="/drivers" element={<Drivers />} />
                   <Route path="/assignments" element={<Assignments />} />
                   <Route path="/payments" element={<Payments />} />
+                  <Route path="/expenses" element={<Expenses />} />
                   <Route path="*" element={<Navigate to="/" />} />
                 </Routes>
               </Layout>
@@ -199,6 +204,7 @@ export default function App() {
           } 
         />
       </Routes>
+      <Toaster position="top-center" richColors />
     </BrowserRouter>
   );
 }

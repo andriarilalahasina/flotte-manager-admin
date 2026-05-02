@@ -3,6 +3,7 @@ import {
   doc, 
   addDoc, 
   updateDoc, 
+  deleteDoc,
   onSnapshot, 
   query, 
   where 
@@ -28,21 +29,31 @@ export const fleetService = {
   },
 
   addVehicle: async (vehicle: Omit<Vehicle, 'id' | 'createdAt' | 'updatedAt'>) => {
-    const newVehicle = {
-      ...vehicle,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    const docRef = await addDoc(collection(db, 'vehicles'), newVehicle);
-    return { id: docRef.id, ...newVehicle } as Vehicle;
+    try {
+      const newVehicle = {
+        ...vehicle,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      const docRef = await addDoc(collection(db, 'vehicles'), newVehicle);
+      return { id: docRef.id, ...newVehicle } as Vehicle;
+    } catch (error) {
+      console.error("Error adding vehicle:", error);
+      throw new Error("Erreur lors de l'ajout du véhicule");
+    }
   },
 
   updateVehicle: async (id: string, vehicle: Partial<Omit<Vehicle, 'id' | 'createdAt' | 'updatedAt'>>) => {
-    const docRef = doc(db, 'vehicles', id);
-    await updateDoc(docRef, {
-      ...vehicle,
-      updatedAt: new Date().toISOString()
-    });
+    try {
+      const docRef = doc(db, 'vehicles', id);
+      await updateDoc(docRef, {
+        ...vehicle,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error("Error updating vehicle:", error);
+      throw new Error("Erreur lors de la mise à jour du véhicule");
+    }
   },
 
   // Drivers
@@ -55,21 +66,31 @@ export const fleetService = {
   },
 
   addDriver: async (driver: Omit<Driver, 'id' | 'createdAt' | 'updatedAt'>) => {
-    const newDriver = {
-      ...driver,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    const docRef = await addDoc(collection(db, 'drivers'), newDriver);
-    return { id: docRef.id, ...newDriver } as Driver;
+    try {
+      const newDriver = {
+        ...driver,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      const docRef = await addDoc(collection(db, 'drivers'), newDriver);
+      return { id: docRef.id, ...newDriver } as Driver;
+    } catch (error) {
+      console.error("Error adding driver:", error);
+      throw new Error("Erreur lors de l'ajout du chauffeur");
+    }
   },
 
   updateDriver: async (id: string, driver: Partial<Omit<Driver, 'id' | 'createdAt' | 'updatedAt'>>) => {
-    const docRef = doc(db, 'drivers', id);
-    await updateDoc(docRef, {
-      ...driver,
-      updatedAt: new Date().toISOString()
-    });
+    try {
+      const docRef = doc(db, 'drivers', id);
+      await updateDoc(docRef, {
+        ...driver,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error("Error updating driver:", error);
+      throw new Error("Erreur lors de la mise à jour du chauffeur");
+    }
   },
 
   // Assignments
@@ -82,29 +103,39 @@ export const fleetService = {
   },
 
   assignVehicle: async (vehicleId: string, driverId: string, startDate: string) => {
-    const newAssignment = {
-      vehicleId,
-      driverId,
-      startDate,
-      status: 'active',
-      createdAt: new Date().toISOString()
-    };
-    const docRef = await addDoc(collection(db, 'assignments'), newAssignment);
-    
-    // Auto update driver/vehicle references
-    await fleetService.updateDriver(driverId, { vehicleId });
-    
-    return { id: docRef.id, ...newAssignment } as Assignment;
+    try {
+      const newAssignment = {
+        vehicleId,
+        driverId,
+        startDate,
+        status: 'active',
+        createdAt: new Date().toISOString()
+      };
+      const docRef = await addDoc(collection(db, 'assignments'), newAssignment);
+      
+      // Auto update driver/vehicle references
+      await fleetService.updateDriver(driverId, { vehicleId });
+      
+      return { id: docRef.id, ...newAssignment } as Assignment;
+    } catch (error) {
+      console.error("Error assigning vehicle:", error);
+      throw new Error("Erreur lors de l'assignation");
+    }
   },
 
   unassignVehicle: async (assignmentId: string, vehicleId: string, driverId: string) => {
-    const docRef = doc(db, 'assignments', assignmentId);
-    await updateDoc(docRef, {
-      status: 'completed',
-      endDate: new Date().toISOString()
-    });
-    
-    await fleetService.updateDriver(driverId, { vehicleId: undefined });
+    try {
+      const docRef = doc(db, 'assignments', assignmentId);
+      await updateDoc(docRef, {
+        status: 'completed',
+        endDate: new Date().toISOString()
+      });
+      
+      await fleetService.updateDriver(driverId, { vehicleId: undefined });
+    } catch (error) {
+      console.error("Error unassigning vehicle:", error);
+      throw new Error("Erreur lors de la désassignation");
+    }
   },
 
   // Payments
@@ -117,21 +148,41 @@ export const fleetService = {
   },
 
   addPayment: async (payment: Omit<Payment, 'id' | 'createdAt' | 'updatedAt'>) => {
-    const newPayment = {
-      ...payment,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    const docRef = await addDoc(collection(db, 'payments'), newPayment);
-    return { id: docRef.id, ...newPayment } as Payment;
+    try {
+      const newPayment = {
+        ...payment,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      const docRef = await addDoc(collection(db, 'payments'), newPayment);
+      return { id: docRef.id, ...newPayment } as Payment;
+    } catch (error) {
+      console.error("Error adding payment:", error);
+      throw new Error("Erreur lors de l'enregistrement du paiement");
+    }
   },
 
   updatePayment: async (id: string, updates: Partial<Payment>) => {
-    const docRef = doc(db, 'payments', id);
-    await updateDoc(docRef, {
-      ...updates,
-      updatedAt: new Date().toISOString()
-    });
+    try {
+      const docRef = doc(db, 'payments', id);
+      await updateDoc(docRef, {
+        ...updates,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error("Error updating payment:", error);
+      throw new Error("Erreur lors de la mise à jour du paiement");
+    }
+  },
+
+  deletePayment: async (id: string) => {
+    try {
+      const docRef = doc(db, 'payments', id);
+      await deleteDoc(docRef);
+    } catch (error) {
+      console.error("Error deleting payment:", error);
+      throw new Error("Erreur lors de la suppression du paiement");
+    }
   },
 
   subscribeDriverPayments: (driverId: string, callback: (payments: Payment[]) => void) => {
@@ -160,12 +211,17 @@ export const fleetService = {
   },
 
   addMaintenanceRecord: async (record: Omit<MaintenanceRecord, 'id' | 'createdAt'>) => {
-    const newRecord = {
-      ...record,
-      createdAt: new Date().toISOString()
-    };
-    const docRef = await addDoc(collection(db, 'maintenance'), newRecord);
-    return { id: docRef.id, ...newRecord } as MaintenanceRecord;
+    try {
+      const newRecord = {
+        ...record,
+        createdAt: new Date().toISOString()
+      };
+      const docRef = await addDoc(collection(db, 'maintenance'), newRecord);
+      return { id: docRef.id, ...newRecord } as MaintenanceRecord;
+    } catch (error) {
+      console.error("Error adding maintenance:", error);
+      throw new Error("Erreur lors de l'ajout de l'entretien");
+    }
   },
 
   // Incidents
@@ -178,11 +234,59 @@ export const fleetService = {
   },
 
   addIncident: async (incident: Omit<Incident, 'id' | 'createdAt'>) => {
-    const newIncident = {
-      ...incident,
-      createdAt: new Date().toISOString()
-    };
-    const docRef = await addDoc(collection(db, 'incidents'), newIncident);
-    return { id: docRef.id, ...newIncident } as Incident;
+    try {
+      const newIncident = {
+        ...incident,
+        createdAt: new Date().toISOString()
+      };
+      const docRef = await addDoc(collection(db, 'incidents'), newIncident);
+      return { id: docRef.id, ...newIncident } as Incident;
+    } catch (error) {
+      console.error("Error adding incident:", error);
+      throw new Error("Erreur lors de l'ajout de l'incident");
+    }
+  },
+
+  // Expenses
+  subscribeExpenses: (callback: (expenses: any[]) => void) => {
+    const q = query(collection(db, 'expenses'));
+    return onSnapshot(q, (snapshot) => {
+      const expenses = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      callback(expenses);
+    });
+  },
+
+  addExpense: async (expense: any) => {
+    try {
+      const newExpense = {
+        ...expense,
+        createdAt: new Date().toISOString()
+      };
+      const docRef = await addDoc(collection(db, 'expenses'), newExpense);
+      return { id: docRef.id, ...newExpense };
+    } catch (error) {
+      console.error("Error adding expense:", error);
+      throw new Error("Erreur lors de l'ajout de la dépense");
+    }
+  },
+
+  updateExpense: async (id: string, data: any) => {
+    try {
+      const docRef = doc(db, 'expenses', id);
+      await updateDoc(docRef, data);
+    } catch (error) {
+      console.error("Error updating expense:", error);
+      throw new Error("Erreur lors de la mise à jour de la dépense");
+    }
+  },
+
+  deleteExpense: async (id: string) => {
+    try {
+      const docRef = doc(db, 'expenses', id);
+      await deleteDoc(docRef);
+    } catch (error) {
+      console.error("Error deleting expense:", error);
+      throw new Error("Erreur lors de la suppression de la dépense");
+    }
   }
 };

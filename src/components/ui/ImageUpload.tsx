@@ -80,7 +80,6 @@ export default function ImageUpload({ value, onChange, label }: ImageUploadProps
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
-                capture="environment"
                 className="hidden"
                 onChange={handleFileChange}
               />

@@ -7,7 +7,8 @@ import {
   Calendar,
   Clock,
   CheckCircle2,
-  Wrench
+  Wrench,
+  Receipt
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { 
@@ -22,7 +23,7 @@ import {
   BarProps
 } from 'recharts';
 import { fleetService } from '../services/fleetService';
-import { Vehicle, Driver, Payment, MaintenanceRecord } from '../types';
+import { Vehicle, Driver, Payment, MaintenanceRecord, Expense, Assignment } from '../types';
 import { format, isAfter, addDays, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { cn } from '../lib/utils';
@@ -32,25 +33,46 @@ export default function Dashboard() {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [maintenance, setMaintenance] = useState<MaintenanceRecord[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
 
   useEffect(() => {
     const unsubV = fleetService.subscribeVehicles(setVehicles);
     const unsubD = fleetService.subscribeDrivers(setDrivers);
     const unsubP = fleetService.subscribePayments(setPayments);
     const unsubM = fleetService.subscribeAllMaintenance(setMaintenance);
+    const unsubE = fleetService.subscribeExpenses(setExpenses);
+    const unsubA = fleetService.subscribeAssignments(setAssignments);
     return () => {
       unsubV();
       unsubD();
       unsubP();
       unsubM();
+      unsubE();
+      unsubA();
     };
   }, []);
 
   const totalRevenue = payments.reduce((acc, p) => acc + p.amount, 0);
   const totalExpenses = maintenance.reduce((acc, m) => acc + (m.cost || 0), 0);
-  const netProfit = totalRevenue - totalExpenses;
-  const activeVehicles = vehicles.filter(v => v.status === 'active').length;
-  const maintenanceNeeded = vehicles.filter(v => v.status === 'maintenance').length;
+  const totalOtherExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
+  const netProfit = totalRevenue - totalExpenses - totalOtherExpenses;
+
+  const getCurrentDriver = (vehicleId: string) => {
+    const activeAssignment = assignments.find(a => a.vehicleId === vehicleId && a.status === 'active');
+    if (!activeAssignment) return null;
+    return drivers.find(d => d.id === activeAssignment.driverId);
+  };
+
+  const getComputedVehicleStatus = (vehicle: Vehicle) => {
+    if (vehicle.status === 'maintenance' || vehicle.status === 'retired') return vehicle.status;
+    const driver = getCurrentDriver(vehicle.id);
+    if (!driver || driver.status !== 'active') return 'inactive';
+    return 'active';
+  };
+
+  const activeVehicles = vehicles.filter(v => getComputedVehicleStatus(v) === 'active').length;
+  const maintenanceNeeded = vehicles.filter(v => getComputedVehicleStatus(v) === 'maintenance').length;
   
   const safeFormat = (dateStr: string | undefined | null, formatStr: string) => {
     if (!dateStr) return 'N/A';
@@ -64,6 +86,30 @@ export default function Dashboard() {
   };
 
   // Alerts
+  const getPaymentAlerts = () => {
+    const today = new Date();
+    const dayOfWeek = today.getDay(); // 0 = Sun, 1 = Mon, 2 = Tue, 3 = Wed, 4 = Thu, 5 = Fri, 6 = Sat
+    
+    // Only check on Tuesday (2), Thursday (4) and Saturday (6)
+    if (![2, 4, 6].includes(dayOfWeek)) return [];
+
+    const todayStr = format(today, 'yyyy-MM-dd');
+    const activeDrivers = drivers.filter(d => d.status === 'active');
+    
+    return activeDrivers.filter(driver => {
+      const hasPaidToday = payments.some(p => 
+        p.driverId === driver.id && 
+        p.date.startsWith(todayStr)
+      );
+      return !hasPaidToday;
+    }).map(driver => ({
+      type: 'd-payment',
+      title: `Paiement en attente : ${driver.firstName} ${driver.lastName}`,
+      date: today.toISOString(),
+      priority: 'high'
+    }));
+  };
+
   const alerts = [
     ...vehicles.filter(v => {
       if (!v.insuranceExpiry) return false;
@@ -83,15 +129,15 @@ export default function Dashboard() {
       try {
         const maintenanceDate = parseISO(v.lastMaintenance);
         if (isNaN(maintenanceDate.getTime())) return false;
-        // Simple logic: if more than 3 months ago (simulated)
-        return isAfter(new Date(), addDays(maintenanceDate, 90));
+        return isAfter(new Date(), addDays(maintenanceDate, 21));
       } catch (e) { return false; }
     }).map(v => ({ 
       type: 'v-maintenance', 
-      title: `Entretien requis : ${v.licensePlate}`, 
+      title: `Vidange à prévoir : ${v.licensePlate}`, 
       date: v.lastMaintenance,
       priority: 'medium'
-    }))
+    })),
+    ...getPaymentAlerts()
   ].sort((a, b) => {
     try {
       const da = parseISO(a.date).getTime();
@@ -116,10 +162,12 @@ export default function Dashboard() {
         };
       }
       
-      if ('amount' in item) {
+      if ('amount' in item && !('category' in item)) { // Payment
         acc[dateKey].revenue += (item as Payment).amount;
-      } else if ('cost' in item) {
+      } else if ('cost' in item) { // Maintenance
         acc[dateKey].expenses += (item as MaintenanceRecord).cost || 0;
+      } else if ('category' in item) { // Expense
+        acc[dateKey].expenses += (item as Expense).amount;
       }
       
       return acc;
@@ -131,8 +179,9 @@ export default function Dashboard() {
   const stats = [
     { label: 'Flotte Active', value: `${activeVehicles} / ${vehicles.length}`, icon: Car, color: 'text-[#829379]', bg: 'bg-[#F0EDE4]' },
     { label: 'Chauffeurs Actifs', value: drivers.filter(d => d.status === 'active').length, icon: Users, color: 'text-[#829379]', bg: 'bg-[#F0EDE4]' },
-    { label: 'Dépenses Entretien', value: `${totalExpenses.toLocaleString()} Ar`, icon: Wrench, color: 'text-[#D97757]', bg: 'bg-[#FFF5F2]' },
-    { label: 'Bénéfice Net', value: `${netProfit.toLocaleString()} Ar`, icon: TrendingUp, color: 'text-[#C18C5D]', bg: 'bg-[#FEF9EC]' },
+    { label: 'Entretien', value: `${totalExpenses.toLocaleString()} Ar`, icon: Wrench, color: 'text-[#D97757]', bg: 'bg-[#FFF5F2]' },
+    { label: 'Frais Généraux', value: `${totalOtherExpenses.toLocaleString()} Ar`, icon: Receipt, color: 'text-[#C18C5D]', bg: 'bg-[#FEF9EC]' },
+    { label: 'Bénéfice Net', value: `${netProfit.toLocaleString()} Ar`, icon: TrendingUp, color: 'text-[#829379]', bg: 'bg-[#F0EDE4]' },
   ];
 
   return (
@@ -143,7 +192,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
         {stats.map((stat, i) => (
           <motion.div
             initial={{ opacity: 0, y: 20 }}

@@ -1,4 +1,4 @@
-export type VehicleStatus = 'active' | 'maintenance' | 'retired';
+export type VehicleStatus = 'active' | 'maintenance' | 'retired' | 'inactive';
 export type DriverStatus = 'active' | 'suspended' | 'inactive' | 'dismissed';
 export type AssignmentStatus = 'active' | 'completed';
 export type MaintenanceType = 'vidange' | 'revision' | 'reparation' | 'autre';
@@ -29,6 +29,8 @@ export interface Driver {
   firstName?: string;
   lastName?: string;
   phone: string;
+  phone2?: string;
+  address?: string;
   idCardNumber?: string;
   licenseNumber: string;
   licenseExpiry: string;
@@ -37,7 +39,9 @@ export interface Driver {
   dailyRent?: number;
   photoUrl?: string;
   idCardPhotoUrl?: string;
+  idCardBackPhotoUrl?: string;
   licensePhotoUrl?: string;
+  residenceCertPhotoUrl?: string;
   notes?: string;
   vehicleId?: string;
   createdAt: string;
@@ -96,3 +100,16 @@ export interface Incident {
   severity: Severity;
   createdAt: string;
 }
+
+export type ExpenseCategory = 'office' | 'salary' | 'marketing' | 'legal' | 'equipment' | 'other';
+
+export interface Expense {
+  id: string;
+  date: string; // ISO Date
+  amount: number;
+  category: ExpenseCategory;
+  description: string;
+  reference?: string;
+  createdAt: string;
+}
+
